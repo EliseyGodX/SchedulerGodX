@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import queue
 import threading
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -18,7 +17,6 @@ from schedulergodx.client.publisher import Publisher
 class Client:
     name: str = 'client'
     log_name: str = 'core'
-    responce_queue: queue.Queue = queue.Queue()
     thread_map: Mapping[str, threading.Thread] = field(default_factory=lambda: {
         'task_launch': {},
         'task_delayed_launch': {}
@@ -111,4 +109,3 @@ class Client:
         if filter is None: 
             return self.thread_map
         return {type_: self.thread_map[type_] for type_ in filter}
-        

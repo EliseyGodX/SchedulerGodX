@@ -1,6 +1,6 @@
 from typing import Generator, TypeVar
 
-from ulid import ULID
+from ulid import ulid
 
 MessageId = TypeVar('MessageId', str, int)
 
@@ -12,5 +12,5 @@ def autoincrement(start_point: int = 0):
 
 def ulid_generator():
     while True:
-        yield str(ULID())
+        yield str(ulid())
         
