@@ -6,7 +6,7 @@ import schedulergodx.utils as utils
 
 class Consumer(utils.AbstractionConnectClass):
     
-    def start_consuming(self, on_message: Callable) -> NoReturn:
+    def start_consuming(self, on_message: Callable) -> NoReturn:  # type: ignore[misc]
         self.channel.basic_consume(self.queue, on_message)
         self.channel.start_consuming()
 

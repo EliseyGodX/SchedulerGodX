@@ -11,6 +11,7 @@ class Message(Enum):
 class Error(Enum):
     IncorrectType = 'the received message has an incorrect type'
     
+    
 class AllClients:
     
     def __eq__(self, value: object) -> bool:

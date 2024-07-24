@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import timedelta
 from logging import Logger
-from typing import Any, Callable, Generator, Mapping, Sequence
+from typing import Any, Callable, Generator, Mapping, Sequence, MutableMapping, NoReturn, TypeAlias
 
 import dill
 
@@ -13,26 +13,36 @@ from schedulergodx.client.consumer import Consumer
 from schedulergodx.client.publisher import Publisher
 
 
+ThreadMap: TypeAlias = (
+    Mapping[
+        str, MutableMapping[
+            str, threading.Thread
+            ]
+        ]
+)
+
 @dataclass
 class Client:
     name: str = 'client'
     log_name: str = 'core'
-    thread_map: Mapping[str, threading.Thread] = field(default_factory=lambda: {
+    thread_map: ThreadMap = field(default_factory=lambda: {
         'task_launch': {},
         'task_delayed_launch': {}
     })
-    rmq_parameters: Mapping[str, Any] = field(default_factory=dict)
-    rmq_credentials: Sequence[str] = field(default_factory=list)
+    rmq_connect: utils.RmqConnect = utils.RmqConnect(
+        rmq_parameters=utils.rmq_default_settings.parametrs,
+        rmq_credentials=utils.rmq_default_settings.credentials
+    )
     rmq_publisher_que: str = 'client-service'
     rmq_consumer_que: str = 'service-client'
-    id_generator: Generator = utils.ulid_generator()
+    id_generator: Generator[utils.MessageId, Any, NoReturn] = utils.ulid_generator()
     logger: Logger = utils.LoggerConstructor(name=name).getLogger()
     
     def __post_init__(self) -> None:
-        connection_kwargs = {'logger': self.logger, 'rmq_parametrs': self.rmq_parameters, 
-                             'rmq_credentials': self.rmq_credentials}
-        self.publisher = Publisher('publisher', rmq_que=self.rmq_publisher_que, **connection_kwargs)
-        self.consumer = Consumer('consumer', rmq_que=self.rmq_consumer_que, **connection_kwargs)
+        self.publisher = Publisher('publisher', rmq_que=self.rmq_publisher_que, 
+                                   logger=self.logger, rmq_connect=self.rmq_connect)
+        self.consumer = Consumer('consumer', rmq_que=self.rmq_consumer_que, 
+                                 logger=self.logger, rmq_connect=self.rmq_connect)
         self._logging('info', f'successful initialization')
         
     @staticmethod
@@ -94,10 +104,10 @@ class Client:
                                 
         return Task(func, self)
            
-    def get_response(self, message_id: utils.MessageId) -> Mapping | None:
+    def get_response(self, message_id: utils.MessageId) -> dict | None:
         return self.consumer.get_response(message_id)
     
-    async def async_get_response(self, message_id: utils.MessageId, heartbeat: int = 0.2) -> Mapping:
+    async def async_get_response(self, message_id: utils.MessageId, heartbeat: float = 0.2) -> dict:
         while True:
             response = self.get_response(message_id)
             if response is not None: 
@@ -105,7 +115,7 @@ class Client:
                 return response
             await asyncio.sleep(heartbeat) 
 
-    def get_threads(self, filter: Sequence[str] | None = None) -> Mapping:
+    def get_threads(self, filter: Sequence[str] | None = None) -> ThreadMap:
         if filter is None: 
             return self.thread_map
         return {type_: self.thread_map[type_] for type_ in filter}

@@ -6,7 +6,7 @@ import schedulergodx.utils as utils
 
 class Consumer(utils.AbstractionConnectClass):
     
-    def get_response(self, message_id: utils.MessageId) -> Mapping | None:
+    def get_response(self, message_id: utils.MessageId) -> dict | None:
         self.channel.tx_select()
         while True:
             method_frame, header_frame, body = self.channel.basic_get(queue=self.queue, auto_ack=False)
@@ -20,6 +20,7 @@ class Consumer(utils.AbstractionConnectClass):
             else:
                 break
         self.channel.tx_commit()
+        return None
 
 
         
