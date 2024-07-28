@@ -1,5 +1,4 @@
 import json
-from typing import Any, Mapping
 
 import schedulergodx.utils as utils
 
@@ -21,7 +20,3 @@ class Consumer(utils.AbstractionConnectClass):
                 break
         self.channel.tx_commit()
         return None
-
-
-        
-    

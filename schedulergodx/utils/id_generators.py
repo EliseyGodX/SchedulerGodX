@@ -1,10 +1,10 @@
-from typing import Generator, TypeAlias, NoReturn
+from typing import Generator, TypeAlias, NoReturn, Optional
 
 from ulid import ulid
 
 MessageId: TypeAlias = str
 
-def autoincrement(start_point: int = 0) -> Generator[MessageId, int, NoReturn]:
+def autoincrement(start_point: int = 0) -> Generator[MessageId, Optional[int], NoReturn]:
     current_id = start_point
     while True:
         current_id += 1

@@ -1,6 +1,6 @@
 import pika
 from pika.adapters.blocking_connection import BlockingChannel
-from typing import Any, Mapping, NoReturn, Sequence
+from typing import Any, Mapping, Sequence
 from collections import namedtuple
 
 RmqSettings = namedtuple('RmqSettings', 'parametrs credentials')

@@ -7,7 +7,7 @@ from typing import Callable
 class LoggerConstructor:
     
     def __init__(self, name: str = 'logger', log_file: str = 'schedulergodx.log', 
-                 log_level: int = logging.INFO):
+                 log_level: int = logging.INFO) -> None:
        self.logger = logging.getLogger(name)
        self.logger.setLevel(log_level)
        file_handler = FileHandler(log_file)
@@ -17,7 +17,7 @@ class LoggerConstructor:
        self.logger.addHandler(file_handler)
     
     @staticmethod
-    def log_levels(logger) -> dict[str, Callable]:
+    def log_levels(logger: Logger) -> dict[str, Callable]:
         return {
             'debug': logger.debug,
             'info': logger.info,
@@ -26,10 +26,10 @@ class LoggerConstructor:
             'fatal': logger.fatal
         }
         
-    def addHandler(self, hdlr: logging.Handler):
+    def addHandler(self, hdlr: logging.Handler) -> None:
        self.logger.addHandler(hdlr=hdlr)
     
-    def addFilter(self, filter: logging.Filter):
+    def addFilter(self, filter: logging.Filter) -> None:
         self.logger.addFilter(filter)
         
     def getLogger(self) -> Logger:

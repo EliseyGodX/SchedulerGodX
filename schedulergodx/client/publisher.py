@@ -6,10 +6,10 @@ import schedulergodx.utils as utils
 
 class Publisher(utils.AbstractionConnectClass):
     
-    def publish(self, data: Mapping, delivery_mode: int = 2):
+    def publish(self, data: Mapping, delivery_mode: int = 2) -> None:
         self.channel.basic_publish(
             exchange='',
-            routing_key='service-client',
+            routing_key=self.queue,
             body=json.dumps(data),
             properties=pika.BasicProperties(
                 delivery_mode=delivery_mode,
