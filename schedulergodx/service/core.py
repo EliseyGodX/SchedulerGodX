@@ -1,9 +1,11 @@
-from functools import cached_property
+import bisect
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import cached_property
 from logging import Logger
-from typing import Any, Generator, MutableSequence, NoReturn, Optional
+from typing import (Any, Callable, Generator, Iterable, Mapping,
+                    MutableSequence, NoReturn, Optional)
 
 import schedulergodx.utils as utils
 from schedulergodx.service.consumer import Consumer
@@ -21,29 +23,101 @@ class _Client:
     def __repr__(self) -> str:
         return self.name
         
-    def __eq__(self, another_client) -> bool:
-        return self.name == another_client
+    def __eq__(self, other_client: '_Client') -> bool:
+        return self.name == other_client
     
     
 class Task:
     
-    def __init__(self, id: str, client: str, type: utils.Message, delay: Optional[int], task) -> None:
-        ...
+    def __init__(self, db: DB, id: utils.MessageId,
+                 time_to_start: utils.Serializable) -> None:
+        self.db = db
+        self.id = id
+        self.time_to_start: datetime = utils.MessageConstructor.deserialization(time_to_start)
+        
+    def __repr__(self) -> str:
+        return self.id
+    
+    def __lt__(self, other_task: 'Task') -> bool:
+        return self.get_delay() < other_task.get_delay()
+    
+    def get_delay(self) -> int:
+        return int(
+            (self.time_to_start - datetime.now())
+            .total_seconds()
+            )
+        
+    def db_save(self, client: str, func: utils.Serializable, func_args: utils.Serializable, 
+                func_kwargs: utils.Serializable, lifetime: int) -> None:
+        task = self.db.Task(
+           id = self.id,
+           client = client,
+           status = utils.TaskStatus.WAITING,
+           time_to_start = utils.MessageConstructor.serialization(self.time_to_start),
+           task = func,
+           task_args = func_args,
+           task_kwargs = func_kwargs,
+           lifetime = lifetime
+        )
+        self.db.session.add(task)
+        self.db.session.commit()
+        
+    def run(self) -> tuple:
+        task = self.db.session.query(self.db.Task).get(self.id)
+        task.status = utils.TaskStatus.WORK
+        self.db.session.commit()
+        return (
+            task.client, task.lifetime, task.hard,
+            *utils.MessageConstructor.bulk_deserialization(
+                task.task, task.task_args, task.task_kwargs
+                )
+        )
         
 
+class ClientPool:
+    
+    def __init__(self, db: utils.DB) -> None:
+        self.clients: list[_Client] = []
+        self.db = db
+    
+    def __repr__(self) -> str:
+        return f'<ClientPool (size: {len(self.clients)})>'
+        
+    def append(self, client: _Client) -> None:
+        self.clients.append(client)
+        self.db.add_client(client.__dict__)
+        
+
+class TaskPool:
+    
+    def __init__(self) -> None:
+        self.tasks: list[Task] = []
+        
+    def __repr__(self) -> str:
+        return f'<TaskPool (size: {len(self.tasks)})>'
+    
+    def append(self, task: Task) -> None:
+        bisect.insort(self.tasks, task)
+        
+    def delay(self) -> int:
+        return self.tasks[0].get_delay()
+        
+    def task(self) -> Task:
+        return self.tasks.pop(0)
+                
+    
 @dataclass
 class Service(utils.AbstractionCore):
     name: str = 'service'
-    active_client: MutableSequence[_Client] = field(
-        default_factory=lambda: []
-        )
-    db: DB = DB(service_db=True)
+    db: DB = DB(path='sqlite://SchedulerGodX_Service', service_db=True)
     
     def __post_init__(self) -> None:
         self.publisher = Publisher('publisher', rmq_que=self.rmq_publisher_que, 
                                    logger=self.logger, rmq_connect=self.rmq_connect)
         self.consumer = Consumer('consumer', rmq_que=self.rmq_consumer_que, 
                                  logger=self.logger, rmq_connect=self.rmq_connect)
+        self.client_pool: ClientPool = ClientPool(db=self.db)
+        self.task_pool: TaskPool = TaskPool()
         self._logging('info', f'successful initialization')
     
     @property
@@ -66,11 +140,6 @@ class Service(utils.AbstractionCore):
         ))
         self._logging('error', f'Error {error} (message id: {message_id}, client: {client})')
         
-    def add_active_client(self, client: _Client) -> None:
-        self.active_client.append(client)
-        self.db.add_client(client.__dict__)
-        self._logging('info', f'new client ({client})')
-        
     def start(self, enable_overdue: bool = False) -> NoReturn:
         ...
         
@@ -84,12 +153,12 @@ class Service(utils.AbstractionCore):
             except KeyError:
                 return self._logging('error', 'the received message has an incorrect format')
                 
-            if (message.metadata['client'] not in self.active_client 
+            if (message.metadata['client'] not in self.client_pool 
                 and message.metadata['type'] != utils.Message.INITIALIZATION):
                 return self._error_message(
                     message_id = message.metadata['id'], 
                     client = message.metadata['client'],
-                    error = utils.MessageErrorStatus.UNREGGISTERED_CLIENT,
+                    error = utils.MessageErrorStatus.UNREGISTERED_CLIENT,
                     error_message = 'a message has been received from an unregistered client'
                 )
                             
@@ -105,22 +174,40 @@ class Service(utils.AbstractionCore):
                             error = utils.MessageErrorStatus.BAD_INITIALIZATION,
                             error_message = 'incorrect client parameters'
                         )
-                    if client in self.active_client: return self._error_message(
-                        message_id = message.metadata['id'],
-                        client = message.metadata['client'],
-                        error = utils.MessageErrorStatus.DUPLICAT_NAME,
-                        error_message = 'a client with this name exists'
-                    )
-                    self.add_active_client(client)   
+                    self.client_pool.append(_Client)
+                    self._logging('info', f'client {client} has been initialized') 
                     self.publisher.publish(data = utils.MessageConstructor.info(
                         id_ = message.metadata['id'],
                         client = message.metadata['client'],
                         responce = utils.MessageInfoStatus.OK.value
                     ))
                 
-                case utils.Message.INFO: ...
+                case utils.Message.INFO:
+                    return self._logging('info', f'info message: {body}')
                 
-                case utils.Message.TASK: ...
+                case utils.Message.TASK: 
+                    try:
+                        task = Task(
+                            db = self.db,
+                            id = message.metadata['id'],
+                            time_to_start = message.arguments['time_to_start'] 
+                        )
+                        task.db_save(
+                            client = message.metadata['client'],
+                            func = message.arguments['function'],
+                            func_args = message.arguments['args'],
+                            func_kwargs = message.arguments['kwargs'],
+                            lifetime = message.metadata['lifetime']
+                        )
+                        self.task_pool.append(task)
+                        self._logging('info', f'The task was received (id: {task.id})')
+                    except:
+                        return self._error_message(
+                            message_id = message.metadata['id'],
+                            client = message.metadata['client'],
+                            error = utils.MessageErrorStatus.INVALID_TASK,
+                            error_message = 'the task has an incorrect format'
+                        )
                 
                 case _:
                      return self._error_message(
@@ -131,14 +218,4 @@ class Service(utils.AbstractionCore):
                     )
                     
         self.consumer.start_consuming(on_message)
-        
-    def get_delay(self, time: datetime) -> int: 
-        delay = int(
-            (time - datetime.now())
-            .total_seconds())
-        if delay < 0: delay = 0
-        return delay
-
-    def timings(self):
-        pass
         

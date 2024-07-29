@@ -1,7 +1,7 @@
 import base64
 import json
 from collections import namedtuple
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Callable, Iterable, Mapping, Optional, TypeAlias
 
@@ -27,15 +27,23 @@ class MessageInfoStatus(Enum):
 class MessageErrorStatus(Enum):
     BAD_INITIALIZATION = 0
     INCORRECT_TYPE = 1
-    UNREGGISTERED_CLIENT = 2
-    DUPLICAT_NAME = 3
+    UNREGISTERED_CLIENT = 2
+    INVALID_TASK = 3
     
     
 class MessageConstructor:
     
     @staticmethod
-    def func_serialization(func: Callable) -> str:
-        return base64.b64encode(dill.dumps(func)).decode('utf-8')
+    def serialization(object: object) -> str:
+        return base64.b64encode(dill.dumps(object)).decode('utf-8')
+    
+    @staticmethod
+    def deserialization(object: str) -> object:
+        return dill.loads(base64.b64decode(object))
+    
+    @staticmethod 
+    def bulk_deserialization(*args: Iterable):
+        return map(MessageConstructor.deserialization, args)
     
     @staticmethod
     def initialization(id_: MessageId, client: str, **arguments) -> dict:
@@ -69,20 +77,24 @@ class MessageConstructor:
         }
     
     @staticmethod
-    def task(id_: MessageId, client: str, type: Message, lifetime: int, 
-             func: Callable, func_args: Iterable, func_kwargs: Mapping, 
-             delay: Optional[timedelta] = None, hard: bool = False) -> dict:
+    def task(id_: MessageId, client: str, lifetime: int, 
+            func: Callable, func_args: Iterable, func_kwargs: Mapping, 
+            delay: Optional[timedelta] = None, hard: bool = False) -> dict: 
+        if delay:
+            time_to_start = delay + datetime.now()
+        else: 
+            time_to_start = datetime.now()
         return {
             'id': id_,
             'client': client,
-            'type': type.value,
+            'type': Message.TASK.value,
             'arguments': {
                 'lifetime': lifetime,
-                'function': MessageConstructor.func_serialization(func),
-                'args': func_args,
-                'kwargs': func_kwargs,
-                'hard': hard,
-                'delay': delay.total_seconds() if delay else None
+                'function': MessageConstructor.serialization(func),
+                'args': MessageConstructor.serialization(func_args),
+                'kwargs': MessageConstructor.serialization(func_kwargs),
+                'time_to_start': MessageConstructor.serialization(time_to_start),
+                'hard': hard
             }
         }
     

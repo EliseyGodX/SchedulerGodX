@@ -28,7 +28,6 @@ class Client(utils.AbstractionCore):
                                    logger=self.logger, rmq_connect=self.rmq_connect)
         self.consumer = Consumer('consumer', rmq_que=self.rmq_consumer_que, 
                                  logger=self.logger, rmq_connect=self.rmq_connect)
-        
         id_ = next(self.id_generator)
         self.push(data=utils.MessageConstructor.initialization(
             id_ = id_, client = self.name,
@@ -87,8 +86,6 @@ class Client(utils.AbstractionCore):
                             # metadata
                             id_ = id_, 
                             client = self.client.name,
-                            type = utils.Message.TASK,
-                            
                             # arguments
                             lifetime = self.hard_task_lifetime if self.hard else self.task_lifetime,  
                             func = self.func, func_args = args, func_kwargs = kwargs,

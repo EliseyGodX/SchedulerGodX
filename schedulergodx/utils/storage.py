@@ -2,7 +2,8 @@ import enum
 from datetime import datetime, timedelta
 from functools import cached_property
 
-from sqlalchemy import BLOB, Column, Enum, Boolean, String, create_engine, inspect
+from sqlalchemy import (Boolean, Column, Enum, Integer, String, create_engine,
+                        inspect)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import Session
@@ -34,7 +35,11 @@ class DB:
         client = Column(String)
         status = Column(Enum(TaskStatus))
         time_to_start = Column(String)
-        task = Column(BLOB)
+        task = Column(String)
+        task_args = Column(String, nullable=True)
+        task_kwargs = Column(String, nullable=True)
+        lifetime = Column(Integer)
+        hard = Column(Boolean)
         
     class Client(ClientBase):
         __tablename__ = 'client'
@@ -54,6 +59,6 @@ class DB:
         
     @servicemethod
     def add_client(self, client: dict) -> None:
-        record = DB.Client(**client)
-        self.session.add(record)
+        client = DB.Client(**client)
+        self.session.merge(client)
         self.session.commit()

@@ -1,3 +1,4 @@
+from functools import cached_property
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -30,7 +31,6 @@ class AbstractionConnectClass(ABC):
 
 @dataclass
 class AbstractionCore(ABC):    
-    module_name: str = 'abstraction_core'
     core_name: str = 'core'
     _thread_map: ThreadMap = field(default_factory=lambda: {})
     rmq_connect: RmqConnect = RmqConnect(
@@ -49,7 +49,7 @@ class AbstractionCore(ABC):
     def rmq_consumer_que(self) -> str:
         ''' '''
         
-    @property
+    @cached_property
     @abstractmethod
     def logger(self) -> Logger:
         ''' '''
