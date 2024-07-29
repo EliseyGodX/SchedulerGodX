@@ -29,6 +29,8 @@ class MessageErrorStatus(Enum):
     INCORRECT_TYPE = 1
     UNREGISTERED_CLIENT = 2
     INVALID_TASK = 3
+    ERROR_IN_TASK = 4
+    TASK_TIMEOT_ERROR = 5
     
     
 class MessageConstructor:
@@ -46,28 +48,28 @@ class MessageConstructor:
         return map(MessageConstructor.deserialization, args)
     
     @staticmethod
-    def initialization(id_: MessageId, client: str, **arguments) -> dict:
+    def initialization(id: MessageId, client: str, **arguments) -> dict:
         return {
-            'id': id_,
+            'id': id,
             'client': client,
             'type': Message.INITIALIZATION.value,
             'arguments': arguments
         }
     
     @staticmethod
-    def info(id_: MessageId, client: str, **arguments) -> dict:
+    def info(id: MessageId, client: str, **arguments) -> dict:
         return {
-            'id': id_,
+            'id': id,
             'client': client,
             'type': Message.INFO.value,
             'arguments': arguments
         }
     
     @staticmethod
-    def error(id_: MessageId, client: str, 
+    def error(id: MessageId, client: str, 
               error: MessageErrorStatus, message: str) -> dict:
         return {
-            'id': id_,
+            'id': id,
             'client': client,
             'type': Message.ERROR.value,
             'arguments': {
@@ -77,15 +79,15 @@ class MessageConstructor:
         }
     
     @staticmethod
-    def task(id_: MessageId, client: str, lifetime: int, 
+    def task(id: MessageId, client: str, lifetime: int, 
             func: Callable, func_args: Iterable, func_kwargs: Mapping, 
             delay: Optional[timedelta] = None, hard: bool = False) -> dict: 
         if delay:
-            time_to_start = delay + datetime.now()
+            time_to_start = timedelta(seconds=delay) + datetime.now()
         else: 
             time_to_start = datetime.now()
         return {
-            'id': id_,
+            'id': id,
             'client': client,
             'type': Message.TASK.value,
             'arguments': {

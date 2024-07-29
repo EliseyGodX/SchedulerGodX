@@ -30,11 +30,10 @@ class Client(utils.AbstractionCore):
                                  logger=self.logger, rmq_connect=self.rmq_connect)
         id_ = next(self.id_generator)
         self.push(data=utils.MessageConstructor.initialization(
-            id_ = id_, client = self.name,
+            id = id_, client = self.name,
             enable_overdue = self.enable_overdue
         ))
-        responce = utils.MessageConstructor.disassemble(
-            self.sync_await_responce(id_))
+        responce = self.sync_await_responce(id_)
         if responce.metadata['type'] == utils.Message.ERROR:
             error = f'{responce.arguments["error_code"]} - {responce.arguments["message"]}'
             self._logging('fatal', error)
@@ -84,7 +83,7 @@ class Client(utils.AbstractionCore):
                     thread_kwargs = {
                         'data': utils.MessageConstructor.task(
                             # metadata
-                            id_ = id_, 
+                            id = id_, 
                             client = self.client.name,
                             # arguments
                             lifetime = self.hard_task_lifetime if self.hard else self.task_lifetime,  
@@ -100,10 +99,10 @@ class Client(utils.AbstractionCore):
         self.publisher.publish(data, **kwargs)
         self._logging('debug', f'A message ({data.get("id")}) has been sent to {self.publisher.name}')
         
-    def get_response(self, message_id: utils.MessageId) -> dict | None:
+    def get_response(self, message_id: utils.MessageId) -> utils.MessageDisassemble | None:
         return self.consumer.get_response(message_id)
     
-    def sync_await_responce(self, message_id: utils.MessageId) -> dict:
+    def sync_await_responce(self, message_id: utils.MessageId) -> utils.MessageDisassemble:
         while True:
             responce = self.get_response(message_id)
             if responce: 
@@ -111,7 +110,7 @@ class Client(utils.AbstractionCore):
                 return responce
     
     async def async_get_response(self, message_id: utils.MessageId, 
-                                 heartbeat: float = 0.2) -> dict:
+                                 heartbeat: float = 0.2) -> utils.MessageDisassemble:
         while True:
             response = self.get_response(message_id)
             if response: 

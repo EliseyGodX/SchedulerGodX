@@ -1,9 +1,11 @@
 import bisect
+import concurrent.futures
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from functools import cached_property
 from logging import Logger
+import threading
 from typing import (Any, Callable, Generator, Iterable, Mapping,
                     MutableSequence, NoReturn, Optional)
 
@@ -29,8 +31,8 @@ class _Client:
     
 class Task:
     
-    def __init__(self, db: DB, id: utils.MessageId,
-                 time_to_start: utils.Serializable) -> None:
+    def __init__(self, id: utils.MessageId, time_to_start: utils.Serializable, 
+                 db: Optional[DB] = None) -> None:
         self.db = db
         self.id = id
         self.time_to_start: datetime = utils.MessageConstructor.deserialization(time_to_start)
@@ -38,14 +40,13 @@ class Task:
     def __repr__(self) -> str:
         return self.id
     
-    def __lt__(self, other_task: 'Task') -> bool:
-        return self.get_delay() < other_task.get_delay()
-    
     def get_delay(self) -> int:
-        return int(
+        delay =  int(
             (self.time_to_start - datetime.now())
             .total_seconds()
             )
+        if delay <= 0: return 0
+        return delay
         
     def db_save(self, client: str, func: utils.Serializable, func_args: utils.Serializable, 
                 func_kwargs: utils.Serializable, lifetime: int) -> None:
@@ -67,7 +68,7 @@ class Task:
         task.status = utils.TaskStatus.WORK
         self.db.session.commit()
         return (
-            task.client, task.lifetime, task.hard,
+            task.client, task.lifetime,
             *utils.MessageConstructor.bulk_deserialization(
                 task.task, task.task_args, task.task_kwargs
                 )
@@ -87,29 +88,14 @@ class ClientPool:
         self.clients.append(client)
         self.db.add_client(client.__dict__)
         
-
-class TaskPool:
-    
-    def __init__(self) -> None:
-        self.tasks: list[Task] = []
-        
-    def __repr__(self) -> str:
-        return f'<TaskPool (size: {len(self.tasks)})>'
-    
-    def append(self, task: Task) -> None:
-        bisect.insort(self.tasks, task)
-        
-    def delay(self) -> int:
-        return self.tasks[0].get_delay()
-        
-    def task(self) -> Task:
-        return self.tasks.pop(0)
+    def __contains__(self, item: _Client) -> bool:
+        return item in self.clients
                 
     
 @dataclass
 class Service(utils.AbstractionCore):
     name: str = 'service'
-    db: DB = DB(path='sqlite://SchedulerGodX_Service', service_db=True)
+    db: DB = DB(service_db=True)
     
     def __post_init__(self) -> None:
         self.publisher = Publisher('publisher', rmq_que=self.rmq_publisher_que, 
@@ -117,7 +103,6 @@ class Service(utils.AbstractionCore):
         self.consumer = Consumer('consumer', rmq_que=self.rmq_consumer_que, 
                                  logger=self.logger, rmq_connect=self.rmq_connect)
         self.client_pool: ClientPool = ClientPool(db=self.db)
-        self.task_pool: TaskPool = TaskPool()
         self._logging('info', f'successful initialization')
     
     @property
@@ -135,13 +120,39 @@ class Service(utils.AbstractionCore):
     def _error_message(self, message_id: utils.MessageId, client: str, 
                        error: utils.MessageErrorStatus, error_message: str) -> None:
         self.publisher.publish(data=utils.MessageConstructor.error(
-            id_ = message_id, client = client,
+            id = message_id, client = client,
             error = error, message = error_message
         ))
         self._logging('error', f'Error {error} (message id: {message_id}, client: {client})')
         
-    def start(self, enable_overdue: bool = False) -> NoReturn:
-        ...
+    def _task_work(self, task: Task) -> None:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            client, lifetime, func, args, kwargs = task.run()
+            future = executor.submit(func, *args, **kwargs)
+            try:
+                future.result(timeout=lifetime)
+                self._logging('info', f'task is completed (id: {task.id})')
+                self.publisher.publish(utils.MessageConstructor.info(
+                    id = task.id, client = client,
+                    responce = utils.MessageInfoStatus.OK.value
+                ))
+            except concurrent.futures.TimeoutError:
+                self._error_message(id = task.id, client = client, 
+                                    error = utils.MessageErrorStatus.TASK_TIMEOT_ERROR,
+                                    error_message = f'task {task.id} was canceled due to an error timeout')            
+            except Exception as e:
+                self._error_message(message_id = task.id, client = client, 
+                                    error = utils.MessageErrorStatus.ERROR_IN_TASK,
+                                    error_message = f'task {task.id}: {e}')
+            
+    def _add_task(self, task: Task) -> None:
+        def wrapper() -> None:
+            self._task_work(task)
+        timer = threading.Timer(
+            interval = task.get_delay(),
+            function = wrapper
+            )
+        timer.start()                
         
     def _start_consuming(self) -> NoReturn:
         def on_message(channel, method_frame, header_frame, body) -> None:
@@ -174,10 +185,10 @@ class Service(utils.AbstractionCore):
                             error = utils.MessageErrorStatus.BAD_INITIALIZATION,
                             error_message = 'incorrect client parameters'
                         )
-                    self.client_pool.append(_Client)
+                    self.client_pool.append(client)
                     self._logging('info', f'client {client} has been initialized') 
                     self.publisher.publish(data = utils.MessageConstructor.info(
-                        id_ = message.metadata['id'],
+                        id = message.metadata['id'],
                         client = message.metadata['client'],
                         responce = utils.MessageInfoStatus.OK.value
                     ))
@@ -197,9 +208,9 @@ class Service(utils.AbstractionCore):
                             func = message.arguments['function'],
                             func_args = message.arguments['args'],
                             func_kwargs = message.arguments['kwargs'],
-                            lifetime = message.metadata['lifetime']
+                            lifetime = message.arguments['lifetime']
                         )
-                        self.task_pool.append(task)
+                        self._add_task(task)
                         self._logging('info', f'The task was received (id: {task.id})')
                     except:
                         return self._error_message(
@@ -218,4 +229,5 @@ class Service(utils.AbstractionCore):
                     )
                     
         self.consumer.start_consuming(on_message)
+        
         
