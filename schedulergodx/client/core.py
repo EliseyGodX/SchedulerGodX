@@ -1,24 +1,28 @@
 import asyncio
 import base64
-from functools import cached_property
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import cached_property
 from logging import Logger
-from typing import (Any, Callable, Generator, Mapping, MutableMapping,
+from typing import (Any, Callable, Generator, Iterable, Mapping, MutableMapping,
                     NoReturn, Optional, Sequence, TypeAlias)
-
-import dill
 
 import schedulergodx.utils as utils
 from schedulergodx.client.consumer import Consumer
 from schedulergodx.client.publisher import Publisher
 from schedulergodx.utils.logger import LoggerConstructor
 
+ThreadMap: TypeAlias = (
+    MutableMapping[
+        str, threading.Thread
+            ]
+)
 
 @dataclass
 class Client(utils.AbstractionCore):
     name: str = 'client'
+    _thread_map: ThreadMap = field(default_factory=lambda: {})
     task_lifetime: int = 3
     hard_task_lifetime: int = 10
     enable_overdue: bool = False
@@ -37,11 +41,11 @@ class Client(utils.AbstractionCore):
         if responce.metadata['type'] == utils.Message.ERROR:
             error = f'{responce.arguments["error_code"]} - {responce.arguments["message"]}'
             self._logging('fatal', error)
-            raise error
+            raise Exception(error)
         elif responce.arguments['responce'] == utils.MessageInfoStatus.OK.value:
             self._logging('info', 'successful initialization')
         else: 
-            raise responce
+            raise Exception(responce)
         
     @property
     def rmq_publisher_que(self) -> str:
@@ -59,10 +63,26 @@ class Client(utils.AbstractionCore):
     def time(**kwargs) -> timedelta:
         return timedelta(**kwargs)
     
+    def _new_thread(self, target: Callable, key: str, thread_hint: Optional[str] = None, 
+                    thread_args: Iterable[Any] = (), thread_kwargs: Mapping[str, Any] | None = None) -> None:
+        thread = threading.Thread(target=target, args=thread_args, kwargs=thread_kwargs)
+        self._thread_map[key] = thread
+        thread.start()
+        self._logging('info', f'thread {key} {("("+thread_hint+")") if thread_hint else ""} has started')
+        
+    def get_threads(self) -> ThreadMap:
+        return self._thread_map
+    
+    def get_thread(self, id_: str) -> threading.Thread | None:
+        threads = self._thread_map.keys()
+        for thread in threads:
+            if f'{id_}_' in thread:
+                return self._thread_map[thread]
+    
     def task(self, func: Callable):
         class Task:
             def __init__(self, func: Callable, client: Client, 
-                         delay: Optional[timedelta] = None, hard: bool = False) -> None:
+                         delay: Optional[utils.Seconds] = None, hard: bool = False) -> None:
                 self.func = func
                 self.client = client
                 self.task_lifetime = client.task_lifetime

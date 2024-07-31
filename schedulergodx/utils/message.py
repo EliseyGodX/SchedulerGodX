@@ -10,6 +10,7 @@ import dill
 from schedulergodx.utils.id_generators import MessageId
 
 Serializable : TypeAlias = str | bytes | bytearray
+Seconds: TypeAlias = int
 
 MessageDisassemble = namedtuple('MessageDisassemble', 'metadata arguments')
 
@@ -36,11 +37,11 @@ class MessageErrorStatus(Enum):
 class MessageConstructor:
     
     @staticmethod
-    def serialization(object: object) -> str:
+    def serialization(object: object) -> Serializable:
         return base64.b64encode(dill.dumps(object)).decode('utf-8')
     
     @staticmethod
-    def deserialization(object: str) -> object:
+    def deserialization(object: Serializable) -> object:
         return dill.loads(base64.b64decode(object))
     
     @staticmethod 
@@ -81,7 +82,7 @@ class MessageConstructor:
     @staticmethod
     def task(id: MessageId, client: str, lifetime: int, 
             func: Callable, func_args: Iterable, func_kwargs: Mapping, 
-            delay: Optional[timedelta] = None, hard: bool = False) -> dict: 
+            delay: Optional[Seconds] = None, hard: bool = False) -> dict: 
         if delay:
             time_to_start = timedelta(seconds=delay) + datetime.now()
         else: 

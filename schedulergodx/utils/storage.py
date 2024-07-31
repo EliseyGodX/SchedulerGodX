@@ -1,11 +1,12 @@
 import enum
 from datetime import datetime, timedelta
 from functools import cached_property
+from typing import Any, List
 
 from sqlalchemy import (Boolean, Column, Enum, Integer, String, create_engine,
-                        inspect)
+                        inspect, or_)
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.orm.session import Session
 
 
@@ -16,12 +17,13 @@ class TaskStatus(enum.Enum):
     ERROR = 3
     CANCELLED = 4
     OVERDUE = 5
+    ORPHAN = 6
 
 
 def servicemethod(method):
     def wrapper(self, *args, **kwargs):
         if not self.service_db:
-            raise 'available only for service storage'
+            raise Exception('available only for service storage')
         return method(self, *args, **kwargs)
     return wrapper
 
@@ -54,11 +56,40 @@ class DB:
             self.TaskBase.metadata.create_all(self.engine)
         if not 'client' in inspect(self.engine).get_table_names() and service_db:
             self.ClientBase.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        session_factory = sessionmaker(bind=self.engine)
+        self._Session = scoped_session(session_factory)
+    
+    def get_session(self) -> Session:
+        return self._Session()
+
+    def get_unfulfilled_tasks(self, session: Session) -> List[Task]:
+        return (
+            session.query(DB.Task)
+            .filter(
+                or_(
+                    DB.Task.status == TaskStatus.WAITING,
+                    DB.Task.status == TaskStatus.WORK
+                    )
+            )
+            .all()
+        )
+    
+    @servicemethod
+    def add_client(self, client: dict, session: Session) -> None:
+        client = DB.Client(**client)
+        session.merge(client)
+        session.commit()
         
     @servicemethod
-    def add_client(self, client: dict) -> None:
-        client = DB.Client(**client)
-        self.session.merge(client)
-        self.session.commit()
+    def get_clients(self, session: Session) -> list[Client]:
+        return session.query(DB.Client).all()
+    
+    @servicemethod
+    def get_clients_dicts(self, session: Session) -> list[dict[str, Any]]:
+        clients = []
+        for client in self.get_clients(session):
+            clients.append(
+                {c.key: getattr(client, c.key) for c 
+                 in inspect(client).mapper.column_attrs}
+                )
+        return clients
