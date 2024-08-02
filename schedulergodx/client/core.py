@@ -1,12 +1,11 @@
 import asyncio
-import base64
 import threading
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from functools import cached_property
 from logging import Logger
-from typing import (Any, Callable, Generator, Iterable, Mapping, MutableMapping,
-                    NoReturn, Optional, Sequence, TypeAlias)
+from typing import (Any, Callable, Iterable, Mapping, MutableMapping, Optional,
+                    TypeAlias)
 
 import schedulergodx.utils as utils
 from schedulergodx.client.consumer import Consumer
