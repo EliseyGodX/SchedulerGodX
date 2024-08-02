@@ -22,7 +22,6 @@ ThreadMap: TypeAlias = (
 @dataclass
 class Client(utils.AbstractionCore):
     name: str = 'client'
-    _thread_map: ThreadMap = field(default_factory=lambda: {})
     task_lifetime: int = 3
     hard_task_lifetime: int = 10
     enable_overdue: bool = False
@@ -32,6 +31,7 @@ class Client(utils.AbstractionCore):
                                    logger=self.logger, rmq_connect=self.rmq_connect)
         self.consumer = Consumer('consumer', rmq_que=self.rmq_consumer_que, 
                                  logger=self.logger, rmq_connect=self.rmq_connect)
+        self._thread_map: ThreadMap = {}
         id_ = next(self.id_generator)
         self.push(data=utils.MessageConstructor.initialization(
             id = id_, client = self.name,
@@ -58,10 +58,6 @@ class Client(utils.AbstractionCore):
     @cached_property
     def logger(self) -> Logger:
        return LoggerConstructor(name=self.name).getLogger()
-   
-    @staticmethod
-    def time(**kwargs) -> timedelta:
-        return timedelta(**kwargs)
     
     def _new_thread(self, target: Callable, key: str, thread_hint: Optional[str] = None, 
                     thread_args: Iterable[Any] = (), thread_kwargs: Mapping[str, Any] | None = None) -> None:
@@ -73,44 +69,41 @@ class Client(utils.AbstractionCore):
     def get_threads(self) -> ThreadMap:
         return self._thread_map
     
-    def get_thread(self, id_: str) -> threading.Thread | None:
+    def get_thread(self, id: str) -> threading.Thread | None:
         threads = self._thread_map.keys()
         for thread in threads:
-            if f'{id_}_' in thread:
+            if f'{id}_' in thread:
                 return self._thread_map[thread]
     
     def task(self, func: Callable):
         class Task:
             def __init__(self, func: Callable, client: Client, 
                          delay: Optional[utils.Seconds] = None, hard: bool = False) -> None:
-                self.func = func
-                self.client = client
+                self._func = func
+                self._client = client
                 self.task_lifetime = client.task_lifetime
                 self.hard_task_lifetime = client.hard_task_lifetime
                 self.delay = delay
                 self.hard = hard
                 
-            def set_parametrs(self, **kwargs) -> None:
+            def set_parameters(self, **kwargs) -> None:
                 self.__dict__.update(kwargs)
                 
             def launch(self, *args, **kwargs) -> utils.MessageId:
-                id_ = next(self.client.id_generator)
-                self.client._logging('info', f'launch-task has been created ({id_})')
-                self.client._new_thread(
-                    target = self.client.push, 
+                id_ = next(self._client.id_generator)
+                self._client._logging('info', f'launch-task has been created ({id_})')
+                self._client._new_thread(
+                    target = self._client.push, 
                     thread_hint = self.launch.__name__, 
                     key = f'{id_}_{datetime.now()}', 
                     thread_kwargs = {
                         'data': utils.MessageConstructor.task(
-                            # metadata
-                            id = id_, 
-                            client = self.client.name,
-                            # arguments
+                            id = id_, client = self._client.name,
                             lifetime = self.hard_task_lifetime if self.hard else self.task_lifetime,  
-                            func = self.func, func_args = args, func_kwargs = kwargs,
+                            func = self._func, func_args = args, func_kwargs = kwargs,
                             delay = self.delay, hard = self.hard)}
                     )
-                self.client._logging('info', f'launch-task has been created ({id_})')
+                self._client._logging('info', f'launch-task has been created ({id_})')
                 return id_
                             
         return Task(func, self)

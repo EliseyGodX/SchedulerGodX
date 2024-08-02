@@ -1,3 +1,6 @@
+
+__version__ = '1.0.0'
+
 from schedulergodx.utils.abstractions import (AbstractionConnectClass,
                                               AbstractionCore)
 from schedulergodx.utils.id_generators import (MessageId, autoincrement,
